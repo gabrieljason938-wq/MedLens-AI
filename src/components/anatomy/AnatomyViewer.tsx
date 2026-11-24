@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { ContactShadows, Environment, Html, Lightformer, OrbitControls } from '@react-three/drei';
@@ -6,26 +11,38 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import {
+  Activity,
   AlertCircle,
+  AlertTriangle,
   Box,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Compass,
   Crosshair,
   Eye,
   EyeOff,
+  Flame,
   Grid3X3,
+  Heart,
   Info,
   Layers,
   Loader2,
   Maximize2,
   Minimize2,
+  Move,
   RefreshCw,
   RotateCcw,
+  Search,
   Settings,
+  ShieldAlert,
   Sliders,
+  Sparkles,
+  Tag,
+  Undo2,
   Upload,
   X,
+  Zap,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -36,6 +53,12 @@ import {
   type ZAnatomyManifest,
   type ZAnatomyManifestLayer,
 } from '../../data/zAnatomyAttribution';
+import {
+  ANATOMICAL_DISCLAIMER,
+  lookupOrganByMeshName,
+  ORGAN_MESH_REGISTRY,
+  type OrganRegistryEntry,
+} from '../../data/anatomicalMeshRegistry';
 import type {
   AnatomicalLayerState,
   AnatomicalSystemId,
@@ -46,9 +69,21 @@ import type {
   SelectedOrganInfo,
 } from '../../types/medical';
 import { correlateOrganToSystem, formatOrganDisplayName } from '../../utils/organMatcher';
+import { getStatusClasses, getStatusLabel } from '../../utils/formatters';
 
-type CameraPreset = 'anterior' | 'posterior' | 'lateral' | 'reset';
-type RenderMode = 'standard' | 'ghost-skeleton' | 'xray' | 'wireframe';
+export type CameraPreset = 'anterior' | 'posterior' | 'lateral' | 'superior' | 'reset';
+export type RenderStyle = 'standard' | 'ghost-skeleton' | 'xray' | 'wireframe';
+
+export type AnatomicalVisualizationMode =
+  | 'external-body'
+  | 'transparent-skin'
+  | 'internal-organs'
+  | 'skeletal'
+  | 'muscular'
+  | 'circulatory'
+  | 'nervous'
+  | 'digestive'
+  | 'respiratory';
 
 export interface DiscoveredOrganEntry {
   rawName: string;
@@ -162,8 +197,81 @@ const QUICK_ANATOMY_TARGETS: QuickAnatomyTarget[] = [
   { id: 'nerves', label: 'Nervous System', layerId: 'nervous', system: 'neurological' },
 ];
 
-const DEFAULT_CAMERA_POS = new THREE.Vector3(0, 0.98, 3.65);
-const DEFAULT_TARGET = new THREE.Vector3(0, 0.9, 0);
+export const ANATOMY_MODES_CONFIG: Array<{
+  id: AnatomicalVisualizationMode;
+  label: string;
+  description: string;
+  icon: string;
+}> = [
+  {
+    id: 'external-body',
+    label: 'External Body',
+    description: 'Integumentary surface anatomy & human contours',
+    icon: 'body',
+  },
+  {
+    id: 'transparent-skin',
+    label: 'Transparent Skin',
+    description: 'Translucent skin shell revealing internal thoracic & abdominal organs',
+    icon: 'translucent',
+  },
+  {
+    id: 'internal-organs',
+    label: 'Internal Organs',
+    description: 'Visceral organs, cardiovascular pump & lymphatic clearance',
+    icon: 'visceral',
+  },
+  {
+    id: 'skeletal',
+    label: 'Skeletal System',
+    description: 'Axial & appendicular osseous skeleton and articular joints',
+    icon: 'skeleton',
+  },
+  {
+    id: 'muscular',
+    label: 'Muscular System',
+    description: 'Superficial and deep skeletal muscular groups',
+    icon: 'muscles',
+  },
+  {
+    id: 'circulatory',
+    label: 'Circulatory System',
+    description: 'Arterial tree, heart chambers and venous drainage network',
+    icon: 'vessels',
+  },
+  {
+    id: 'nervous',
+    label: 'Nervous System',
+    description: 'Cerebrum, cerebellum, spinal cord and somatic nerves',
+    icon: 'nerves',
+  },
+  {
+    id: 'digestive',
+    label: 'Digestive System',
+    description: 'Alimentary canal: stomach, liver, pancreas and intestines',
+    icon: 'digestive',
+  },
+  {
+    id: 'respiratory',
+    label: 'Respiratory System',
+    description: 'Pulmonary parenchyma, bronchial arborization and pleura',
+    icon: 'respiratory',
+  },
+];
+
+const LAYER_EXPLODED_OFFSETS: Record<string, [number, number, number]> = {
+  body: [0, 0, 0.45],
+  muscular: [0, 0, 0.24],
+  visceral: [0, 0, 0.36],
+  cardiovascular: [0, 0, 0.18],
+  nervous: [0, 0.05, -0.22],
+  lymphoid: [-0.26, 0, 0.14],
+  skeletal: [0, 0, 0],
+  joints: [0, 0, 0],
+};
+
+const DEFAULT_CAMERA_POS = new THREE.Vector3(0, 0.96, 3.85);
+const DEFAULT_TARGET = new THREE.Vector3(0, 0.92, 0);
 const NOOP_RAYCAST = () => {};
 
 function detectSoftwareGl(): boolean {
@@ -239,7 +347,7 @@ function CameraRig({
     }
     _viewDir.normalize();
 
-    const dist = THREE.MathUtils.clamp(selectedOrgan.radius * 3.1, 0.34, 1.85);
+    const dist = THREE.MathUtils.clamp(selectedOrgan.radius * 3.2, 0.36, 1.85);
     _desiredPos.copy(_desiredTarget).addScaledVector(_viewDir, dist);
     activeTransition.current = true;
     invalidate();
@@ -248,23 +356,28 @@ function CameraRig({
   useEffect(() => {
     if (selectedOrgan || !selectedSystem) return;
     const meta = SYSTEM_META_MAP[selectedSystem];
-    _desiredTarget.set(...meta.cameraTarget);
-    _desiredPos.set(...meta.cameraOffset);
-    activeTransition.current = true;
-    invalidate();
+    if (meta) {
+      _desiredTarget.set(...meta.cameraTarget);
+      _desiredPos.set(...meta.cameraOffset);
+      activeTransition.current = true;
+      invalidate();
+    }
   }, [selectedSystem, selectedOrgan, invalidate]);
 
   useEffect(() => {
     if (!preset) return;
     if (preset === 'anterior') {
       _desiredTarget.copy(DEFAULT_TARGET);
-      _desiredPos.set(0, 0.98, 3.65);
+      _desiredPos.set(0, 0.96, 3.85);
     } else if (preset === 'posterior') {
       _desiredTarget.copy(DEFAULT_TARGET);
-      _desiredPos.set(0, 0.98, -3.65);
+      _desiredPos.set(0, 0.96, -3.85);
     } else if (preset === 'lateral') {
       _desiredTarget.copy(DEFAULT_TARGET);
-      _desiredPos.set(3.55, 0.98, 0.25);
+      _desiredPos.set(3.75, 0.96, 0.2);
+    } else if (preset === 'superior') {
+      _desiredTarget.copy(DEFAULT_TARGET);
+      _desiredPos.set(0, 3.8, 0.25);
     } else if (preset === 'reset') {
       _desiredTarget.copy(DEFAULT_TARGET);
       _desiredPos.copy(DEFAULT_CAMERA_POS);
@@ -281,7 +394,7 @@ function CameraRig({
     _viewDir.subVectors(camera.position, target);
     const currentDist = _viewDir.length() || 2.5;
     _viewDir.normalize();
-    const nextDist = THREE.MathUtils.clamp(currentDist * zoomRequest.delta, 0.24, 5.8);
+    const nextDist = THREE.MathUtils.clamp(currentDist * zoomRequest.delta, 0.24, 6.2);
     _desiredPos.copy(target).addScaledVector(_viewDir, nextDist);
     activeTransition.current = true;
     invalidate();
@@ -291,7 +404,7 @@ function CameraRig({
     const controls = controlsRef.current;
     if (!controls) return;
     if (activeTransition.current) {
-      const dampLambda = isSoftwareGl ? 16 : 6.5;
+      const dampLambda = isSoftwareGl ? 14 : 5.8;
       camera.position.x = THREE.MathUtils.damp(camera.position.x, _desiredPos.x, dampLambda, delta);
       camera.position.y = THREE.MathUtils.damp(camera.position.y, _desiredPos.y, dampLambda, delta);
       camera.position.z = THREE.MathUtils.damp(camera.position.z, _desiredPos.z, dampLambda, delta);
@@ -301,8 +414,8 @@ function CameraRig({
       controls.target.z = THREE.MathUtils.damp(controls.target.z, _desiredTarget.z, dampLambda, delta);
 
       if (
-        camera.position.distanceTo(_desiredPos) < 0.01 &&
-        controls.target.distanceTo(_desiredTarget) < 0.01
+        camera.position.distanceTo(_desiredPos) < 0.008 &&
+        controls.target.distanceTo(_desiredTarget) < 0.008
       ) {
         activeTransition.current = false;
       } else {
@@ -316,20 +429,20 @@ function CameraRig({
     <OrbitControls
       ref={controlsRef}
       makeDefault
-      target={[0, 0.9, 0]}
+      target={[0, 0.92, 0]}
       enableRotate
       enableZoom
       enablePan
       screenSpacePanning
       touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
       autoRotate={autoRotate}
-      autoRotateSpeed={1.2}
+      autoRotateSpeed={1.1}
       enableDamping={!isSoftwareGl}
-      dampingFactor={0.07}
-      minDistance={0.18}
-      maxDistance={6.0}
-      minPolarAngle={0.08}
-      maxPolarAngle={Math.PI * 0.65}
+      dampingFactor={0.06}
+      minDistance={0.16}
+      maxDistance={6.5}
+      minPolarAngle={0.05}
+      maxPolarAngle={Math.PI * 0.72}
       onStart={() => {
         activeTransition.current = false;
       }}
@@ -345,27 +458,37 @@ function cloneMaterialWithOverrides(
     xray: boolean;
     highlighted: boolean;
     dimmed: boolean;
+    isolated: boolean;
   }
 ): THREE.Material {
   const std =
     base instanceof THREE.MeshStandardMaterial
       ? base.clone()
       : new THREE.MeshStandardMaterial({ color: '#cbd5e1' });
-  const baseOpacity = base.transparent ? base.opacity : 1;
-  const targetOpacity = opts.highlighted
-    ? 1
-    : opts.xray
-      ? Math.min(0.28, opts.opacity)
-      : baseOpacity * opts.opacity * (opts.dimmed ? 0.45 : 1);
 
-  std.wireframe = opts.wireframe;
+  const baseOpacity = base.transparent ? base.opacity : 1;
+  let targetOpacity = baseOpacity * opts.opacity;
+
+  if (opts.highlighted) {
+    targetOpacity = 1;
+  } else if (opts.isolated) {
+    targetOpacity = 0.04;
+  } else if (opts.dimmed) {
+    targetOpacity = Math.min(targetOpacity, 0.22);
+  } else if (opts.xray) {
+    targetOpacity = Math.min(0.26, targetOpacity);
+  }
+
+  std.wireframe = opts.wireframe || (opts.isolated && !opts.highlighted);
   std.transparent = targetOpacity < 0.98;
   std.opacity = targetOpacity;
-  std.depthWrite = targetOpacity >= 0.92;
+  std.depthWrite = targetOpacity >= 0.9;
 
   if (opts.highlighted) {
     std.emissive = new THREE.Color('#06b6d4');
-    std.emissiveIntensity = 0.42;
+    std.emissiveIntensity = 0.75;
+    std.roughness = 0.2;
+    std.metalness = 0.15;
   } else {
     std.emissive = new THREE.Color('#000000');
     std.emissiveIntensity = 0;
@@ -379,9 +502,12 @@ interface ZAnatomyLayerMeshProps {
   visible: boolean;
   layerOpacity: number;
   globalOpacity: number;
-  renderMode: RenderMode;
+  renderStyle: RenderStyle;
   selectedOrganUuid: string | null;
   selectedSystem: AnatomicalSystemId | null;
+  isolatedOrganUuid: string | null;
+  hiddenMeshUuids: Set<string>;
+  explodedFactor: number;
   normalizeTransform: { scale: number; offset: [number, number, number] };
   onLayerProgress: (layerId: string, loadedBytes: number, totalBytes: number) => void;
   onLayerLoaded: (layerId: string, organs: DiscoveredOrganEntry[]) => void;
@@ -395,9 +521,12 @@ const ZAnatomyLayerMesh: React.FC<ZAnatomyLayerMeshProps> = ({
   visible,
   layerOpacity,
   globalOpacity,
-  renderMode,
+  renderStyle,
   selectedOrganUuid,
   selectedSystem,
+  isolatedOrganUuid,
+  hiddenMeshUuids,
+  explodedFactor,
   normalizeTransform,
   onLayerProgress,
   onLayerLoaded,
@@ -491,6 +620,25 @@ const ZAnatomyLayerMesh: React.FC<ZAnatomyLayerMeshProps> = ({
     };
   }, [visible, layerMeta, normalizeTransform, onLayerProgress, onLayerLoaded, onLayerError, invalidate]);
 
+  useFrame((_, delta) => {
+    if (!sceneRoot) return;
+    const explOffset = LAYER_EXPLODED_OFFSETS[layerMeta.id] || [0, 0, 0];
+    const targetX = normalizeTransform.offset[0] + explOffset[0] * explodedFactor;
+    const targetY = normalizeTransform.offset[1] + explOffset[1] * explodedFactor;
+    const targetZ = normalizeTransform.offset[2] + explOffset[2] * explodedFactor;
+
+    if (
+      Math.abs(sceneRoot.position.x - targetX) > 0.001 ||
+      Math.abs(sceneRoot.position.y - targetY) > 0.001 ||
+      Math.abs(sceneRoot.position.z - targetZ) > 0.001
+    ) {
+      sceneRoot.position.x = THREE.MathUtils.damp(sceneRoot.position.x, targetX, 6.5, delta);
+      sceneRoot.position.y = THREE.MathUtils.damp(sceneRoot.position.y, targetY, 6.5, delta);
+      sceneRoot.position.z = THREE.MathUtils.damp(sceneRoot.position.z, targetZ, 6.5, delta);
+      invalidate();
+    }
+  });
+
   useEffect(() => {
     if (!sceneRoot) return;
     sceneRoot.visible = visible;
@@ -500,10 +648,10 @@ const ZAnatomyLayerMesh: React.FC<ZAnatomyLayerMeshProps> = ({
     }
 
     const isGhostLayer =
-      renderMode === 'ghost-skeleton' &&
+      renderStyle === 'ghost-skeleton' &&
       (layerMeta.id === 'skeletal' || layerMeta.id === 'muscular' || layerMeta.id === 'joints' || layerMeta.id === 'body');
     const effectiveLayerOpacity = isGhostLayer
-      ? Math.min(layerOpacity, 0.2)
+      ? Math.min(layerOpacity, 0.18)
       : layerOpacity * globalOpacity;
 
     const passThroughBodyShell = layerMeta.id === 'body' && effectiveLayerOpacity < 0.45;
@@ -514,20 +662,32 @@ const ZAnatomyLayerMesh: React.FC<ZAnatomyLayerMeshProps> = ({
       const orig = originalMaterialsRef.current.get(mesh);
       if (!orig) return;
 
+      if (hiddenMeshUuids.has(mesh.uuid)) {
+        mesh.visible = false;
+        mesh.raycast = NOOP_RAYCAST;
+        return;
+      }
+
+      mesh.visible = true;
       mesh.raycast = passThroughBodyShell ? NOOP_RAYCAST : THREE.Mesh.prototype.raycast;
 
       const isSelected = Boolean(selectedOrganUuid && mesh.uuid === selectedOrganUuid);
+      const isIsolated = Boolean(isolatedOrganUuid && mesh.uuid !== isolatedOrganUuid);
       const meshSys = mesh.userData.system as AnatomicalSystemId | undefined;
+
       const dimmed = Boolean(
+        selectedOrganUuid && !isSelected && !isIsolated
+      ) || Boolean(
         !selectedOrganUuid && selectedSystem && meshSys && meshSys !== selectedSystem && layerMeta.id !== 'body'
       );
 
       const opts = {
         opacity: effectiveLayerOpacity,
-        wireframe: renderMode === 'wireframe',
-        xray: renderMode === 'xray',
+        wireframe: renderStyle === 'wireframe',
+        xray: renderStyle === 'xray',
         highlighted: isSelected,
         dimmed,
+        isolated: isIsolated,
       };
 
       if (mesh.material !== orig) {
@@ -545,9 +705,11 @@ const ZAnatomyLayerMesh: React.FC<ZAnatomyLayerMeshProps> = ({
     visible,
     layerOpacity,
     globalOpacity,
-    renderMode,
+    renderStyle,
     selectedOrganUuid,
     selectedSystem,
+    isolatedOrganUuid,
+    hiddenMeshUuids,
     layerMeta.id,
     invalidate,
   ]);
@@ -613,205 +775,56 @@ const ZAnatomyLayerMesh: React.FC<ZAnatomyLayerMeshProps> = ({
   );
 };
 
-interface SingleCustomAssetProps {
-  url: string;
-  renderMode: RenderMode;
-  globalOpacity: number;
-  selectedOrganUuid: string | null;
-  selectedSystem: AnatomicalSystemId | null;
-  onOrgansDiscovered?: (organs: DiscoveredOrganEntry[]) => void;
-  onLoadStateChange: (state: { loading: boolean; progress: number; error: string | null }) => void;
-  onOrganHover: (info: { displayName: string; layerLabel: string; system: AnatomicalSystemId } | null) => void;
-  onOrganClick: (organ: SelectedOrganInfo) => void;
+interface AnatomicalLabelsProps {
+  onSelectTarget: (target: QuickAnatomyTarget) => void;
+  isDark: boolean;
 }
 
-const SingleCustomAsset: React.FC<SingleCustomAssetProps> = ({
-  url,
-  renderMode,
-  globalOpacity,
-  selectedOrganUuid,
-  selectedSystem,
-  onOrgansDiscovered,
-  onLoadStateChange,
-  onOrganHover,
-  onOrganClick,
-}) => {
-  const { invalidate } = useThree();
-  const [sceneRoot, setSceneRoot] = useState<THREE.Group | null>(null);
-  const originalMaterialsRef = useRef<Map<THREE.Mesh, THREE.Material | THREE.Material[]>>(new Map());
+const LANDMARK_LABELS: Array<{ id: string; label: string; pos: [number, number, number] }> = [
+  { id: 'brain', label: 'Brain / Cerebrum', pos: [0, 1.72, 0.05] },
+  { id: 'thyroid', label: 'Thyroid Gland', pos: [0, 1.55, 0.06] },
+  { id: 'lungs', label: 'Lungs & Pleura', pos: [-0.18, 1.34, 0.12] },
+  { id: 'heart', label: 'Heart & Aorta', pos: [0.06, 1.28, 0.14] },
+  { id: 'liver', label: 'Liver', pos: [0.16, 1.14, 0.15] },
+  { id: 'stomach', label: 'Stomach', pos: [-0.12, 1.16, 0.14] },
+  { id: 'pancreas', label: 'Pancreas', pos: [0, 1.08, 0.08] },
+  { id: 'kidneys', label: 'Kidneys', pos: [0.14, 0.98, -0.08] },
+  { id: 'spleen', label: 'Spleen', pos: [-0.22, 1.15, 0.04] },
+  { id: 'intestines', label: 'Intestinal Tract', pos: [0, 0.88, 0.14] },
+  { id: 'skeleton', label: 'Osseous Skeleton', pos: [-0.28, 0.95, 0] },
+];
 
-  useEffect(() => {
-    let cancelled = false;
-    const loader = createConfiguredGltfLoader();
-    onLoadStateChange({ loading: true, progress: 5, error: null });
-
-    loader.load(
-      url,
-      (gltf) => {
-        if (cancelled) return;
-        const root = gltf.scene;
-        const box = new THREE.Box3().setFromObject(root);
-        const size = box.getSize(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z) || 1;
-        const scale = 1.85 / maxDim;
-        root.scale.setScalar(scale);
-
-        root.updateMatrixWorld(true);
-        const scaledBox = new THREE.Box3().setFromObject(root);
-        const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
-        root.position.set(-scaledCenter.x, -scaledBox.min.y + 0.02, -scaledCenter.z);
-        root.updateMatrixWorld(true);
-
-        const organs: DiscoveredOrganEntry[] = [];
-        const matMap = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
-        const tmpBox = new THREE.Box3();
-        const tmpCenter = new THREE.Vector3();
-        const tmpSphere = new THREE.Sphere();
-
-        root.traverse((obj) => {
-          if (!(obj as THREE.Mesh).isMesh) return;
-          const mesh = obj as THREE.Mesh;
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          matMap.set(mesh, mesh.material);
-
-          const rawName = mesh.name || 'Structure';
-          const system = correlateOrganToSystem(rawName);
-          mesh.userData.system = system;
-
-          tmpBox.setFromObject(mesh);
-          if (!tmpBox.isEmpty()) {
-            tmpBox.getCenter(tmpCenter);
-            tmpBox.getBoundingSphere(tmpSphere);
-            organs.push({
-              rawName,
-              displayName: formatOrganDisplayName(rawName),
-              layerId: 'custom',
-              system,
-              meshUuid: mesh.uuid,
-              center: [tmpCenter.x, tmpCenter.y, tmpCenter.z],
-              radius: tmpSphere.radius || 0.14,
-            });
-          }
-        });
-
-        originalMaterialsRef.current = matMap;
-        onOrgansDiscovered?.(organs);
-        setSceneRoot(root);
-        onLoadStateChange({ loading: false, progress: 100, error: null });
-        invalidate();
-      },
-      (evt) => {
-        if (cancelled) return;
-        const pct = evt.lengthComputable && evt.total > 0 ? Math.round((evt.loaded / evt.total) * 100) : 50;
-        onLoadStateChange({ loading: true, progress: pct, error: null });
-      },
-      (err) => {
-        if (cancelled) return;
-        const msg = err instanceof Error ? err.message : 'Unable to load 3D model file.';
-        setSceneRoot(null);
-        onLoadStateChange({ loading: false, progress: 0, error: msg });
-      }
-    );
-
-    return () => {
-      cancelled = true;
-    };
-  }, [url, onLoadStateChange, onOrgansDiscovered, invalidate]);
-
-  useEffect(() => {
-    if (!sceneRoot) return;
-    sceneRoot.traverse((obj) => {
-      if (!(obj as THREE.Mesh).isMesh) return;
-      const mesh = obj as THREE.Mesh;
-      const orig = originalMaterialsRef.current.get(mesh);
-      if (!orig) return;
-
-      const isSelected = Boolean(selectedOrganUuid && mesh.uuid === selectedOrganUuid);
-      const meshSys = mesh.userData.system as AnatomicalSystemId | undefined;
-      const dimmed = Boolean(
-        !selectedOrganUuid && selectedSystem && meshSys && meshSys !== selectedSystem
-      );
-
-      const opts = {
-        opacity: globalOpacity,
-        wireframe: renderMode === 'wireframe',
-        xray: renderMode === 'xray',
-        highlighted: isSelected,
-        dimmed,
-      };
-
-      if (mesh.material !== orig) {
-        disposeMaterial(mesh.material);
-      }
-      if (Array.isArray(orig)) {
-        mesh.material = orig.map((m) => cloneMaterialWithOverrides(m, opts));
-      } else {
-        mesh.material = cloneMaterialWithOverrides(orig, opts);
-      }
-    });
-    invalidate();
-  }, [sceneRoot, renderMode, globalOpacity, selectedOrganUuid, selectedSystem, invalidate]);
-
-  useEffect(() => {
-    if (!sceneRoot) return;
-    return () => {
-      sceneRoot.traverse((obj) => {
-        if (!(obj as THREE.Mesh).isMesh) return;
-        const mesh = obj as THREE.Mesh;
-        mesh.geometry?.dispose();
-        disposeMaterial(mesh.material);
-        const orig = originalMaterialsRef.current.get(mesh);
-        if (orig && orig !== mesh.material) {
-          disposeMaterial(orig);
-        }
-      });
-    };
-  }, [sceneRoot]);
-
-  if (!sceneRoot) return null;
-
+function AnatomicalLabels({ onSelectTarget, isDark }: AnatomicalLabelsProps) {
   return (
-    <primitive
-      object={sceneRoot}
-      onPointerOver={(e: { stopPropagation: () => void; object: THREE.Object3D }) => {
-        e.stopPropagation();
-        document.body.style.cursor = 'pointer';
-        const mesh = e.object as THREE.Mesh;
-        onOrganHover({
-          displayName: formatOrganDisplayName(mesh.name || 'Structure'),
-          layerLabel: 'Custom GLB',
-          system: (mesh.userData.system as AnatomicalSystemId) || 'metabolic',
-        });
-      }}
-      onPointerOut={(e: { stopPropagation: () => void }) => {
-        e.stopPropagation();
-        document.body.style.cursor = 'auto';
-        onOrganHover(null);
-      }}
-      onClick={(e: { stopPropagation: () => void; object: THREE.Object3D }) => {
-        e.stopPropagation();
-        const mesh = e.object as THREE.Mesh;
-        const box = new THREE.Box3().setFromObject(mesh);
-        const center = new THREE.Vector3();
-        const sphere = new THREE.Sphere();
-        box.getCenter(center);
-        box.getBoundingSphere(sphere);
-        const rawName = mesh.name || 'Structure';
-
-        onOrganClick({
-          rawName,
-          displayName: formatOrganDisplayName(rawName),
-          layerId: 'custom',
-          system: correlateOrganToSystem(rawName),
-          meshUuid: mesh.uuid,
-          center: [center.x, center.y, center.z],
-          radius: sphere.radius || 0.14,
-        });
-      }}
-    />
+    <group>
+      {LANDMARK_LABELS.map((lm) => (
+        <group key={lm.id} position={lm.pos}>
+          <mesh>
+            <sphereGeometry args={[0.012, 16, 16]} />
+            <meshStandardMaterial color="#06b6d4" emissive="#06b6d4" emissiveIntensity={0.8} />
+          </mesh>
+          <Html position={[0.025, 0.02, 0]} distanceFactor={3.6} zIndexRange={[15, 0]}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                const target = QUICK_ANATOMY_TARGETS.find((t) => t.id === lm.id);
+                if (target) onSelectTarget(target);
+              }}
+              className={`px-2 py-0.5 rounded text-[10px] font-medium tracking-tight whitespace-nowrap border cursor-pointer shadow-sm transition-transform hover:scale-105 ${
+                isDark
+                  ? 'bg-[#0B1222]/95 text-cyan-300 border-cyan-500/50 hover:bg-cyan-950/80'
+                  : 'bg-white/95 text-cyan-900 border-cyan-400 hover:bg-cyan-50'
+              }`}
+            >
+              {lm.label}
+            </button>
+          </Html>
+        </group>
+      ))}
+    </group>
   );
-};
+}
 
 interface DiagnosticStageProps {
   activeReport: MedicalReport | null;
@@ -848,23 +861,23 @@ function DiagnosticStage({
     <group>
       {/* Futuristic circular platform beneath the human atlas */}
       <mesh position={[0, -0.025, 0]} receiveShadow>
-        <cylinderGeometry args={[0.88, 0.96, 0.05, 64]} />
+        <cylinderGeometry args={[0.92, 1.02, 0.05, 64]} />
         <meshStandardMaterial color={plinthColor} roughness={0.48} metalness={0.42} />
       </mesh>
 
       <mesh position={[0, 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.72, 0.74, 64]} />
-        <meshBasicMaterial color="#06b6d4" transparent opacity={0.55} />
+        <ringGeometry args={[0.74, 0.76, 64]} />
+        <meshBasicMaterial color="#06b6d4" transparent opacity={0.65} />
       </mesh>
 
       <mesh position={[0, 0.003, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.84, 0.85, 64]} />
-        <meshBasicMaterial color="#38bdf8" transparent opacity={0.28} />
+        <ringGeometry args={[0.88, 0.89, 64]} />
+        <meshBasicMaterial color="#38bdf8" transparent opacity={0.32} />
       </mesh>
 
       <mesh position={[0, 0.004, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.45, 0.458, 64]} />
-        <meshBasicMaterial color={ringColor} transparent opacity={0.4} />
+        <ringGeometry args={[0.48, 0.488, 64]} />
+        <meshBasicMaterial color={ringColor} transparent opacity={0.45} />
       </mesh>
 
       {showGrid && (
@@ -954,16 +967,32 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
   const [autoRotate, setAutoRotate] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const [renderMode, setRenderMode] = useState<RenderMode>('standard');
+  // Advanced Visual Modes & Controls
+  const [activeMode, setActiveMode] = useState<AnatomicalVisualizationMode>('transparent-skin');
+  const [renderStyle, setRenderStyle] = useState<RenderStyle>('standard');
+  const [skinOpacity, setSkinOpacity] = useState(0.2);
   const [globalOpacity, setGlobalOpacity] = useState(1);
+  const [explodedFactor, setExplodedFactor] = useState(0);
+  const [showLabels, setShowLabels] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
-  const [showSystemMarkers, setShowSystemMarkers] = useState(true);
+  const [showSystemMarkers, setShowSystemMarkers] = useState(false);
+
+  // Organ Isolation & Structure Hiding
+  const [isolatedOrganUuid, setIsolatedOrganUuid] = useState<string | null>(null);
+  const [hiddenMeshUuids, setHiddenMeshUuids] = useState<Set<string>>(new Set());
+
+  // Search & Navigation
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [dockCollapsed, setDockCollapsed] = useState(compact);
+  const [modesDrawerOpen, setModesDrawerOpen] = useState(false);
   const [layersDrawerOpen, setLayersDrawerOpen] = useState(false);
   const [structuresOpen, setStructuresOpen] = useState(false);
   const [attributionOpen, setAttributionOpen] = useState(false);
+  const [disclaimerOpen, setDisclaimerOpen] = useState(false);
   const [contextLost, setContextLost] = useState(false);
 
+  // Model & Layers State
   const [manifest, setManifest] = useState<ZAnatomyManifest | null>(null);
   const [manifestChecked, setManifestChecked] = useState(false);
   const [manifestError, setManifestError] = useState<string | null>(null);
@@ -975,20 +1004,6 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
   const organsByLayerRef = useRef<Map<string, DiscoveredOrganEntry[]>>(new Map());
   const pendingTargetRef = useRef<QuickAnatomyTarget | null>(null);
 
-  const [customLoadState, setCustomLoadState] = useState<{
-    loading: boolean;
-    progress: number;
-    error: string | null;
-  }>({
-    loading: false,
-    progress: 0,
-    error: null,
-  });
-  const [uploadingModel, setUploadingModel] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
   const [internalSelectedOrgan, setInternalSelectedOrgan] = useState<SelectedOrganInfo | null>(null);
   const activeOrgan = controlledOrgan !== undefined ? controlledOrgan : internalSelectedOrgan;
   const [hoveredOrgan, setHoveredOrgan] = useState<{
@@ -997,8 +1012,21 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
     system: AnatomicalSystemId;
   } | null>(null);
 
-  const isZAnatomyAtlas =
-    !modelAsset || modelAsset.url === '/models/z-anatomy/manifest.json';
+  const activeOrganRegistryEntry: OrganRegistryEntry | null = useMemo(() => {
+    if (!activeOrgan) return null;
+    return lookupOrganByMeshName(activeOrgan.rawName);
+  }, [activeOrgan]);
+
+  const activeOrganLinkedParams: LabParameter[] = useMemo(() => {
+    if (!activeReport || !activeOrgan) return [];
+    const directMatches = activeReport.parameters.filter(
+      (p) =>
+        p.organTarget.toLowerCase().includes(activeOrgan.displayName.toLowerCase()) ||
+        activeOrgan.displayName.toLowerCase().includes(p.organTarget.toLowerCase())
+    );
+    if (directMatches.length > 0) return directMatches;
+    return activeReport.parameters.filter((p) => p.system === activeOrgan.system);
+  }, [activeReport, activeOrgan]);
 
   useEffect(() => {
     const onFsChange = () => {
@@ -1034,6 +1062,9 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
           }
           setLayerVisibility(vis);
           setLayerOpacities(opac);
+          if (opac.body !== undefined) {
+            setSkinOpacity(opac.body);
+          }
         } else {
           setManifestError('Z-Anatomy manifest contained no anatomical layer entries.');
         }
@@ -1070,6 +1101,7 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
     };
   }, [manifest]);
 
+  // Synchronize layers state to parent views
   useEffect(() => {
     if (!manifest || !onLayersStateChange) return;
     const list: AnatomicalLayerState[] = manifest.layers.map((l) => {
@@ -1165,6 +1197,7 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
 
   const handleQuickStructureSelect = (target: QuickAnatomyTarget) => {
     setStructuresOpen(false);
+    setSearchOpen(false);
     setLayerVisibility((prev) => ({ ...prev, [target.layerId]: true }));
     if (loadedLayers[target.layerId]) {
       const layerOrgans = organsByLayerRef.current.get(target.layerId) || [];
@@ -1181,22 +1214,185 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
     }
   };
 
-  const handleModelFile = async (file: File) => {
-    setUploadError(null);
-    setUploadingModel(true);
-    try {
-      await onUploadModelFile(file);
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Failed to load 3D model.');
-    } finally {
-      setUploadingModel(false);
+  // Switch between the 9 Anatomical Visualization Modes
+  const handleSelectMode = (mode: AnatomicalVisualizationMode) => {
+    setActiveMode(mode);
+    setModesDrawerOpen(false);
+    setIsolatedOrganUuid(null);
+
+    setLayerVisibility((prev) => {
+      const next = { ...prev };
+      switch (mode) {
+        case 'external-body':
+          return {
+            body: true,
+            visceral: false,
+            cardiovascular: false,
+            skeletal: false,
+            muscular: false,
+            nervous: false,
+            lymphoid: false,
+            joints: false,
+          };
+        case 'transparent-skin':
+          return {
+            body: true,
+            visceral: true,
+            cardiovascular: true,
+            skeletal: true,
+            muscular: false,
+            nervous: false,
+            lymphoid: true,
+            joints: false,
+          };
+        case 'internal-organs':
+          return {
+            body: false,
+            visceral: true,
+            cardiovascular: true,
+            skeletal: true,
+            muscular: false,
+            nervous: false,
+            lymphoid: true,
+            joints: false,
+          };
+        case 'skeletal':
+          return {
+            body: false,
+            visceral: false,
+            cardiovascular: false,
+            skeletal: true,
+            muscular: false,
+            nervous: false,
+            lymphoid: false,
+            joints: true,
+          };
+        case 'muscular':
+          return {
+            body: false,
+            visceral: false,
+            cardiovascular: false,
+            skeletal: true,
+            muscular: true,
+            nervous: false,
+            lymphoid: false,
+            joints: true,
+          };
+        case 'circulatory':
+          return {
+            body: false,
+            visceral: false,
+            cardiovascular: true,
+            skeletal: true,
+            muscular: false,
+            nervous: false,
+            lymphoid: false,
+            joints: false,
+          };
+        case 'nervous':
+          return {
+            body: false,
+            visceral: false,
+            cardiovascular: false,
+            skeletal: true,
+            muscular: false,
+            nervous: true,
+            lymphoid: false,
+            joints: false,
+          };
+        case 'digestive':
+          return {
+            body: false,
+            visceral: true,
+            cardiovascular: false,
+            skeletal: true,
+            muscular: false,
+            nervous: false,
+            lymphoid: false,
+            joints: false,
+          };
+        case 'respiratory':
+          return {
+            body: false,
+            visceral: true,
+            cardiovascular: false,
+            skeletal: true,
+            muscular: false,
+            nervous: false,
+            lymphoid: false,
+            joints: false,
+          };
+        default:
+          return next;
+      }
+    });
+
+    setLayerOpacities((prev) => {
+      const next = { ...prev };
+      if (mode === 'external-body') {
+        next.body = 1.0;
+        setSkinOpacity(1.0);
+      } else if (mode === 'transparent-skin') {
+        next.body = 0.2;
+        setSkinOpacity(0.2);
+      } else if (mode === 'skeletal' || mode === 'muscular' || mode === 'circulatory' || mode === 'nervous' || mode === 'digestive' || mode === 'respiratory') {
+        next.skeletal = mode === 'skeletal' ? 1.0 : 0.16;
+      }
+      return next;
+    });
+
+    if (mode === 'digestive') {
+      onSelectSystem('metabolic');
+    } else if (mode === 'respiratory') {
+      onSelectSystem('pulmonary');
+    } else if (mode === 'circulatory') {
+      onSelectSystem('cardiovascular');
+    } else if (mode === 'nervous') {
+      onSelectSystem('neurological');
+    } else if (mode === 'skeletal' || mode === 'muscular') {
+      onSelectSystem('musculoskeletal');
+    } else {
+      onSelectSystem(null);
     }
+  };
+
+  const handleSkinOpacityChange = (val: number) => {
+    setSkinOpacity(val);
+    setLayerOpacities((prev) => ({ ...prev, body: val }));
+  };
+
+  const handleIsolateOrgan = () => {
+    if (!activeOrgan) return;
+    setIsolatedOrganUuid((curr) => (curr === activeOrgan.meshUuid ? null : activeOrgan.meshUuid));
+  };
+
+  const handleHideSelectedStructure = () => {
+    if (!activeOrgan) return;
+    setHiddenMeshUuids((prev) => {
+      const next = new Set(prev);
+      next.add(activeOrgan.meshUuid);
+      return next;
+    });
+    handleOrganSelect(null);
+  };
+
+  const handleUnhideAll = () => {
+    setHiddenMeshUuids(new Set());
+  };
+
+  const handleRestoreCompleteBody = () => {
+    setIsolatedOrganUuid(null);
+    setHiddenMeshUuids(new Set());
+    setExplodedFactor(0);
+    handleOrganSelect(null);
+    onSelectSystem(null);
+    handleSelectMode('transparent-skin');
+    triggerPreset('anterior');
   };
 
   const triggerPreset = (nextPreset: CameraPreset) => {
     if (nextPreset === 'reset') {
-      handleOrganSelect(null);
-      onSelectSystem(null);
+      handleRestoreCompleteBody();
       setAutoRotate(false);
     }
     setPreset(nextPreset);
@@ -1225,10 +1421,23 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
     }
   };
 
-  const hasActiveAtlas = Boolean(isZAnatomyAtlas && manifest);
-  const hasCustomGlb = Boolean(!isZAnatomyAtlas && modelAsset);
-  const hasAnyRealModel = hasActiveAtlas || hasCustomGlb;
+  const allDiscoveredOrgans: DiscoveredOrganEntry[] = useMemo(() => {
+    const list: DiscoveredOrganEntry[] = [];
+    for (const arr of organsByLayerRef.current.values()) {
+      list.push(...arr);
+    }
+    return list;
+  }, [loadedLayers]);
 
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return allDiscoveredOrgans
+      .filter((org) => org.displayName.toLowerCase().includes(q) || org.rawName.toLowerCase().includes(q))
+      .slice(0, 16);
+  }, [searchQuery, allDiscoveredOrgans]);
+
+  const hasActiveAtlas = Boolean(manifest);
   const visibleAtlasLayers = useMemo(
     () => (hasActiveAtlas ? manifest!.layers.filter((l) => layerVisibility[l.id]) : []),
     [hasActiveAtlas, manifest, layerVisibility]
@@ -1238,18 +1447,7 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
     (l) => !loadedLayers[l.id] && !layerErrors[l.id]
   );
 
-  const visibleLayerErrorEntries = useMemo(
-    () =>
-      visibleAtlasLayers
-        .filter((l) => layerErrors[l.id])
-        .map((l) => ({ id: l.id, label: l.label, url: l.url, error: layerErrors[l.id] })),
-    [visibleAtlasLayers, layerErrors]
-  );
-
   const loadingProgressStats = useMemo(() => {
-    if (hasCustomGlb && customLoadState.loading) {
-      return { percent: customLoadState.progress, label: 'Loading custom .GLB asset' };
-    }
     if (!hasActiveAtlas || visibleAtlasLayers.length === 0) {
       return { percent: 100, label: '' };
     }
@@ -1272,123 +1470,136 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
       percent: doneCount === visibleAtlasLayers.length ? 100 : percent,
       label: `Loading Z-Anatomy layers (${doneCount}/${visibleAtlasLayers.length})`,
     };
-  }, [hasCustomGlb, customLoadState, hasActiveAtlas, visibleAtlasLayers, layerProgress, loadedLayers]);
+  }, [hasActiveAtlas, visibleAtlasLayers, layerProgress, loadedLayers]);
 
   const stageBg = isDark ? '#060B16' : '#F1F5F9';
 
   return (
     <div
       ref={containerRef}
-      className={`relative overflow-hidden border border-slate-200 dark:border-slate-800/80 bg-slate-100 dark:bg-[#060B16] ${
+      className={`relative overflow-hidden border border-slate-200 dark:border-slate-800/80 bg-slate-100 dark:bg-[#060B16] select-none ${
         isFullscreen
           ? 'fixed inset-0 z-50 w-screen h-screen rounded-none'
-          : `w-full rounded-xl ${compact ? 'h-[480px] lg:h-[560px]' : 'h-[580px] lg:h-[700px]'}`
+          : `w-full rounded-xl ${compact ? 'h-[500px] lg:h-[580px]' : 'h-[600px] lg:h-[720px]'}`
       }`}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDragging(true);
-      }}
-      onDragLeave={() => setIsDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setIsDragging(false);
-        const file = e.dataTransfer.files?.[0];
-        if (file) void handleModelFile(file);
-      }}
     >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".glb,.gltf"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void handleModelFile(file);
-          e.target.value = '';
-        }}
-      />
-
       {/* Top HUD Bar */}
       <div className="pointer-events-none absolute top-3 left-3 right-3 z-20 flex items-start justify-between gap-2">
-        <div className="pointer-events-auto rounded-lg border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 px-3 py-1.5 max-w-[280px]">
-          <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
-            <Box className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-            <span className="truncate">
-              {hasActiveAtlas
-                ? 'Z-Anatomy 3D Human Atlas'
-                : hasCustomGlb
-                  ? modelAsset!.name
-                  : '3D Anatomical Workspace'}
-            </span>
+        <div className="pointer-events-auto flex items-center gap-2">
+          <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/95 px-3 py-1.5 shadow-xs">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
+              <Box className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+              <span>Z-Anatomy 3D Human Atlas</span>
+            </div>
+            <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+              PBR Medical Visualizer · Real Mesh Layers
+            </p>
           </div>
-          <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 truncate">
-            {hasActiveAtlas
-              ? 'Click organs to focus · Drag to rotate · Right-drag to pan'
-              : hasCustomGlb
-                ? 'Click meshes to inspect organ correlations'
-                : 'Awaiting anatomical .GLB/.GLTF asset'}
-          </p>
+
+          {/* Educational Disclaimer Pill */}
+          <button
+            type="button"
+            onClick={() => setDisclaimerOpen((v) => !v)}
+            className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 px-2.5 py-1.5 text-[11px] font-medium text-cyan-700 dark:text-cyan-300 transition-colors cursor-pointer hidden md:flex items-center gap-1.5"
+            title="General educational anatomical model disclaimer"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-cyan-500" />
+            <span>General Educational Model</span>
+          </button>
         </div>
 
         <div className="pointer-events-auto flex items-center gap-1.5 shrink-0">
-          {hasActiveAtlas && (
-            <button
-              type="button"
-              onClick={() => {
-                setStructuresOpen((v) => !v);
-                setLayersDrawerOpen(false);
-                setAttributionOpen(false);
-              }}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                structuresOpen
-                  ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300'
-                  : 'border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 text-slate-700 dark:text-slate-200 hover:border-cyan-500/50'
-              }`}
-            >
-              <Compass className="w-3.5 h-3.5" />
-              Structures
-            </button>
-          )}
+          {/* Organ Search Trigger */}
+          <button
+            type="button"
+            onClick={() => setSearchOpen((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+              searchOpen
+                ? 'border-cyan-500 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300'
+                : 'border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 text-slate-700 dark:text-slate-200 hover:border-cyan-500/50'
+            }`}
+            title="Search Anatomical Structures"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Search</span>
+          </button>
 
-          {hasActiveAtlas && (
-            <button
-              type="button"
-              onClick={() => {
-                setLayersDrawerOpen((v) => !v);
-                setStructuresOpen(false);
-                setAttributionOpen(false);
-              }}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                layersDrawerOpen
-                  ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300'
-                  : 'border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 text-slate-700 dark:text-slate-200 hover:border-cyan-500/50'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              Layers
-            </button>
-          )}
+          {/* 9 Visualization Modes Dropdown */}
+          <button
+            type="button"
+            aria-label="Visualization Modes"
+            onClick={() => {
+              setModesDrawerOpen((v) => !v);
+              setLayersDrawerOpen(false);
+              setStructuresOpen(false);
+              setAttributionOpen(false);
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+              modesDrawerOpen
+                ? 'border-cyan-500 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 font-semibold'
+                : 'border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 text-slate-700 dark:text-slate-200 hover:border-cyan-500/50'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
+            <span className="capitalize">{activeMode.replace('-', ' ')}</span>
+            <ChevronDown className="w-3 h-3 text-slate-400" />
+          </button>
 
-          {hasActiveAtlas && (
-            <button
-              type="button"
-              onClick={() => {
-                setAttributionOpen((v) => !v);
-                setLayersDrawerOpen(false);
-                setStructuresOpen(false);
-              }}
-              title="Z-Anatomy & BodyParts3D License Attribution"
-              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                attributionOpen
-                  ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300'
-                  : 'border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 text-slate-600 dark:text-slate-300 hover:border-cyan-500/50'
-              }`}
-            >
-              <Info className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">CC BY-SA 4.0</span>
-            </button>
-          )}
+          {/* Quick Structures Drawer */}
+          <button
+            type="button"
+            onClick={() => {
+              setStructuresOpen((v) => !v);
+              setModesDrawerOpen(false);
+              setLayersDrawerOpen(false);
+              setAttributionOpen(false);
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+              structuresOpen
+                ? 'border-cyan-500 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300'
+                : 'border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 text-slate-700 dark:text-slate-200 hover:border-cyan-500/50'
+            }`}
+          >
+            <Compass className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Organs</span>
+          </button>
 
+          {/* Layers Drawer */}
+          <button
+            type="button"
+            onClick={() => {
+              setLayersDrawerOpen((v) => !v);
+              setModesDrawerOpen(false);
+              setStructuresOpen(false);
+              setAttributionOpen(false);
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+              layersDrawerOpen
+                ? 'border-cyan-500 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300'
+                : 'border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 text-slate-700 dark:text-slate-200 hover:border-cyan-500/50'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Layers</span>
+          </button>
+
+          {/* License & Attribution */}
+          <button
+            type="button"
+            onClick={() => {
+              setAttributionOpen((v) => !v);
+              setModesDrawerOpen(false);
+              setLayersDrawerOpen(false);
+              setStructuresOpen(false);
+            }}
+            title="Z-Anatomy & BodyParts3D License Attribution"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 px-2 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:border-cyan-500/50 cursor-pointer"
+          >
+            <Info className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">CC BY-SA</span>
+          </button>
+
+          {/* Fullscreen Button */}
           <button
             type="button"
             onClick={() => void toggleFullscreen()}
@@ -1396,56 +1607,300 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
             aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
             className="inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 p-1.5 text-slate-600 dark:text-slate-300 hover:border-cyan-500/50 transition-colors cursor-pointer"
           >
-            {isFullscreen ? (
-              <Minimize2 className="w-3.5 h-3.5" />
-            ) : (
-              <Maximize2 className="w-3.5 h-3.5" />
-            )}
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
 
-      {/* Selected / Hover Organ HUD */}
-      {(hoveredOrgan || activeOrgan) && (
-        <div className="pointer-events-none absolute top-[68px] left-3 z-20 flex flex-col gap-1.5 max-w-xs">
-          {activeOrgan && (
-            <div className="pointer-events-auto flex items-center justify-between gap-2.5 rounded-lg border border-cyan-500/50 bg-white/96 dark:bg-[#0B1222]/96 px-3 py-2 text-xs shadow-sm">
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-[10px] font-medium text-cyan-600 dark:text-cyan-400">
-                  <Crosshair className="w-3 h-3" />
-                  <span>Selected Organ · {SYSTEM_META_MAP[activeOrgan.system].label}</span>
-                </div>
-                <div className="font-semibold text-slate-900 dark:text-slate-100 truncate mt-0.5">
-                  {activeOrgan.displayName}
-                </div>
-              </div>
+      {/* Educational Disclaimer Banner Modal */}
+      {disclaimerOpen && (
+        <div className="absolute top-14 left-3 z-30 max-w-md rounded-xl border border-cyan-500/40 bg-white/98 dark:bg-[#0B1222]/98 p-3.5 shadow-lg text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800 font-semibold text-slate-900 dark:text-slate-100">
+            <span className="flex items-center gap-1.5 text-cyan-600 dark:text-cyan-400">
+              <ShieldAlert className="w-4 h-4" />
+              General Educational Model Notice
+            </span>
+            <button
+              type="button"
+              aria-label="Close educational notice"
+              onClick={() => setDisclaimerOpen(false)}
+              className="text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <p className="mt-2 text-[11px]">{ANATOMICAL_DISCLAIMER}</p>
+        </div>
+      )}
+
+      {/* Organ Search Overlay */}
+      {searchOpen && (
+        <div className="absolute top-14 left-3 right-3 sm:right-auto sm:w-80 z-30 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/98 dark:bg-[#0B1222]/98 p-3 shadow-xl">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search organ, muscle, bone, or vessel..."
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#070C18] pl-8 pr-7 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-cyan-500"
+            />
+            {searchQuery && (
               <button
                 type="button"
-                onClick={() => triggerPreset('reset')}
-                aria-label="Clear organ focus"
-                className="p-1 rounded text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
-            </div>
-          )}
+            )}
+          </div>
 
-          {hoveredOrgan && hoveredOrgan.displayName !== activeOrgan?.displayName && (
-            <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 px-3 py-1.5 text-[11px]">
-              <span className="font-semibold text-slate-900 dark:text-slate-100">
-                {hoveredOrgan.displayName}
-              </span>
-              <span className="text-slate-500 dark:text-slate-400 ml-1.5">
-                · {hoveredOrgan.layerLabel}
-              </span>
+          <div className="mt-2 max-h-56 overflow-y-auto space-y-1 pr-1">
+            {searchResults.length === 0 && searchQuery ? (
+              <p className="py-4 text-center text-xs text-slate-400">No matching anatomical structure found.</p>
+            ) : searchResults.length === 0 ? (
+              <div className="py-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <span className="font-medium text-slate-700 dark:text-slate-300">Quick suggestions:</span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {['Heart', 'Liver', 'Kidneys', 'Lungs', 'Brain', 'Stomach', 'Pancreas', 'Skeleton'].map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => setSearchQuery(q)}
+                      className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 cursor-pointer"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              searchResults.map((org) => (
+                <button
+                  key={org.meshUuid}
+                  type="button"
+                  onClick={() => {
+                    handleOrganSelect(org);
+                    setSearchOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between gap-2 rounded-lg border border-transparent hover:border-cyan-500/40 hover:bg-cyan-500/10 px-2.5 py-1.5 text-left text-xs text-slate-800 dark:text-slate-200 cursor-pointer"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{org.displayName}</div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 capitalize">
+                      {org.layerId} · {SYSTEM_META_MAP[org.system]?.label || org.system}
+                    </div>
+                  </div>
+                  <Crosshair className="w-3.5 h-3.5 text-cyan-500 shrink-0 opacity-75" />
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 9 Visualization Modes Drawer */}
+      {modesDrawerOpen && (
+        <div className="absolute top-14 right-3 z-30 w-80 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/98 dark:bg-[#0B1222]/98 p-3 shadow-xl">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800 font-semibold text-xs text-slate-900 dark:text-slate-100">
+            <span className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
+              Anatomical Visualization Modes
+            </span>
+            <button
+              type="button"
+              onClick={() => setModesDrawerOpen(false)}
+              className="text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="mt-2.5 space-y-1.5 max-h-80 overflow-y-auto pr-1">
+            {ANATOMY_MODES_CONFIG.map((mode) => {
+              const isSelected = activeMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => handleSelectMode(mode.id)}
+                  className={`w-full text-left rounded-lg border p-2.5 transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-900 dark:text-cyan-200'
+                      : 'border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-[#070C18]/60 text-slate-700 dark:text-slate-300 hover:border-cyan-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1 text-xs font-semibold">
+                    <span>{mode.label}</span>
+                    {isSelected && <span className="text-[10px] font-mono text-cyan-500">ACTIVE</span>}
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                    {mode.description}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Hover Tooltip HUD */}
+      {hoveredOrgan && !activeOrgan && (
+        <div className="pointer-events-none absolute top-16 left-3 z-10 max-w-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/95 px-3 py-1.5 text-xs shadow-xs">
+          <div className="font-semibold text-slate-900 dark:text-slate-100 truncate">
+            {hoveredOrgan.displayName}
+          </div>
+          <div className="text-[10px] text-slate-500 dark:text-slate-400">
+            {hoveredOrgan.layerLabel} · Click to inspect biological function & biomarkers
+          </div>
+        </div>
+      )}
+
+      {/* Organ Inspection Card (Full Medical Educational Details & Biomarkers) */}
+      {activeOrgan && (
+        <div className="absolute top-14 left-3 z-20 w-84 sm:w-96 max-w-[calc(100%-24px)] rounded-xl border border-cyan-500/50 bg-white/98 dark:bg-[#0B1222]/98 p-4 shadow-xl">
+          <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+            <div>
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold text-cyan-600 dark:text-cyan-400 uppercase tracking-wide">
+                <Crosshair className="w-3.5 h-3.5" />
+                <span>Selected Anatomical Structure</span>
+              </div>
+              <h3 className="font-display text-sm font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                {activeOrganRegistryEntry?.normalizedName || activeOrgan.displayName}
+              </h3>
+              <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                Layer: <span className="font-medium capitalize">{activeOrgan.layerId}</span> · System:{' '}
+                <span className="font-medium text-cyan-600 dark:text-cyan-400">
+                  {SYSTEM_META_MAP[activeOrgan.system]?.label || activeOrgan.system}
+                </span>
+              </div>
             </div>
-          )}
+
+            <button
+              type="button"
+              onClick={() => handleOrganSelect(null)}
+              className="p-1 rounded text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
+              title="Close inspection"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-2.5 max-h-72 overflow-y-auto pr-1 text-xs text-slate-700 dark:text-slate-300">
+            {/* Biological Function */}
+            <div>
+              <span className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1 text-[11px]">
+                <Activity className="w-3.5 h-3.5 text-cyan-500" />
+                Biological Function:
+              </span>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                {activeOrganRegistryEntry?.biologicalFunction ||
+                  'Specialized anatomical tissue executing vital physiological processes and structural integrity within its corresponding body system.'}
+              </p>
+            </div>
+
+            {/* Educational Role */}
+            <div>
+              <span className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1 text-[11px]">
+                <Info className="w-3.5 h-3.5 text-cyan-500" />
+                Role in Human Body:
+              </span>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                {activeOrganRegistryEntry?.educationalRole ||
+                  'Maintains coordinated physiological homeostasis through spatial orientation and anatomical continuity with adjacent structures.'}
+              </p>
+            </div>
+
+            {/* Clinical & Laboratory Biomarkers */}
+            <div>
+              <span className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1 text-[11px]">
+                <Activity className="w-3.5 h-3.5 text-cyan-500" />
+                Related Laboratory Biomarkers:
+              </span>
+              {activeOrganLinkedParams.length > 0 ? (
+                <div className="mt-1.5 space-y-1">
+                  {activeOrganLinkedParams.map((p) => {
+                    const cls = getStatusClasses(p.status);
+                    return (
+                      <div
+                        key={p.id}
+                        className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-slate-50 dark:bg-[#070C18] border border-slate-200 dark:border-slate-800 text-[11px]"
+                      >
+                        <div className="truncate">
+                          <span className="font-medium text-slate-900 dark:text-slate-100">{p.name}</span>
+                          <span className="text-[10px] text-slate-400 ml-1.5">
+                            ({p.displayValue} {p.unit})
+                          </span>
+                        </div>
+                        <span className={`inline-flex items-center gap-1 font-medium text-[10px] ${cls.text}`}>
+                          {p.status === 'optimal' ? (
+                            <CheckCircle2 className="w-3 h-3" />
+                          ) : (
+                            <AlertTriangle className="w-3 h-3" />
+                          )}
+                          {getStatusLabel(p.status)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : activeOrganRegistryEntry?.associatedLabParameters ? (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {activeOrganRegistryEntry.associatedLabParameters.map((param) => (
+                    <span
+                      key={param}
+                      className="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 text-[10px] font-mono border border-cyan-500/20"
+                    >
+                      {param}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-[11px] text-slate-400">No active parameters linked to this specific structure.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Action Buttons for Selected Organ */}
+          <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleIsolateOrgan}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border cursor-pointer transition-colors ${
+                  isolatedOrganUuid === activeOrgan.meshUuid
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 font-semibold'
+                    : 'border-slate-200 dark:border-slate-700 hover:border-cyan-500/50'
+                }`}
+              >
+                {isolatedOrganUuid === activeOrgan.meshUuid ? 'Unisolate' : 'Isolate Organ'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleHideSelectedStructure}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-slate-200 dark:border-slate-700 hover:border-rose-500/50 hover:text-rose-500 cursor-pointer transition-colors"
+              >
+                Hide Structure
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleOrganSelect(activeOrgan)}
+              className="text-[11px] text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer"
+            >
+              Re-center Focus
+            </button>
+          </div>
         </div>
       )}
 
       {/* Real Model Loading Progress Indicator */}
-      {(anyVisibleLoading || customLoadState.loading) && (
-        <div className="pointer-events-none absolute top-[68px] right-3 z-20">
+      {anyVisibleLoading && (
+        <div className="pointer-events-none absolute top-14 right-3 z-20">
           <div className="w-60 rounded-lg border border-cyan-500/35 bg-white/95 dark:bg-[#0B1222]/95 px-3 py-2 text-xs text-cyan-700 dark:text-cyan-300 shadow-sm">
             <div className="flex items-center justify-between gap-2">
               <span className="inline-flex items-center gap-1.5 truncate text-[11px] font-medium">
@@ -1565,16 +2020,15 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
                       </span>
                       <input
                         type="range"
-                        min={0.08}
+                        min={0.05}
                         max={1}
-                        step={0.04}
+                        step={0.05}
                         value={opac}
-                        onChange={(e) =>
-                          setLayerOpacities((prev) => ({
-                            ...prev,
-                            [layer.id]: parseFloat(e.target.value),
-                          }))
-                        }
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setLayerOpacities((prev) => ({ ...prev, [layer.id]: val }));
+                          if (layer.id === 'body') setSkinOpacity(val);
+                        }}
                         aria-label={`${layer.label} opacity`}
                         className="flex-1 accent-cyan-500 cursor-pointer"
                       />
@@ -1607,7 +2061,10 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
           </div>
           <div className="mt-2.5 space-y-2 text-[11px] text-slate-600 dark:text-slate-300">
             {Z_ANATOMY_ATTRIBUTIONS.map((attr) => (
-              <div key={attr.title} className="rounded-lg bg-slate-50 dark:bg-[#070C18] p-2 border border-slate-200/80 dark:border-slate-800/70">
+              <div
+                key={attr.title}
+                className="rounded-lg bg-slate-50 dark:bg-[#070C18] p-2 border border-slate-200/80 dark:border-slate-800/70"
+              >
                 <div className="font-semibold text-slate-900 dark:text-slate-100">{attr.title}</div>
                 <div className="text-slate-500 dark:text-slate-400">{attr.authors}</div>
                 <div className="mt-1 flex items-center justify-between">
@@ -1632,88 +2089,35 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
         </div>
       )}
 
-      {/* Actionable Model Setup / Load Failure State (never renders fake primitive anatomy) */}
-      {manifestChecked && !hasAnyRealModel && (
-        <div className="pointer-events-none absolute inset-x-4 top-20 z-10 flex justify-end">
-          <div className="pointer-events-auto w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/95 p-4 shadow-sm">
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-500">
-                <AlertCircle className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  Anatomical 3D Asset Setup Required
-                </h4>
-                <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                  {manifestError
-                    ? `Asset manifest unavailable (${manifestError}).`
-                    : 'No anatomical .GLB/.GLTF asset is loaded.'}{' '}
-                  Place converted Z-Anatomy GLB layers under{' '}
-                  <code className="font-mono text-[11px] text-cyan-600 dark:text-cyan-400">
-                    public/models/z-anatomy/
-                  </code>{' '}
-                  or upload a licensed `.glb` / `.gltf` file.
-                </p>
-              </div>
-            </div>
-
-            {uploadError && (
-              <div className="mt-3 flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-2 text-xs text-rose-600 dark:text-rose-300">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                <span>{uploadError}</span>
-              </div>
-            )}
-
-            <div className="mt-3.5 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                disabled={uploadingModel}
-                onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-cyan-400 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                {uploadingModel ? 'Loading Asset...' : 'Load .GLB / .GLTF'}
-              </button>
-              <button
-                type="button"
-                onClick={() => onNavigate('settings')}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <Settings className="w-3.5 h-3.5" />
-                Configure Asset Path
-              </button>
-            </div>
-          </div>
+      {/* Hidden Structures Restorer Indicator */}
+      {hiddenMeshUuids.size > 0 && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+          <span>{hiddenMeshUuids.size} anatomical structure(s) hidden</span>
+          <button
+            type="button"
+            onClick={handleUnhideAll}
+            className="font-semibold underline hover:text-amber-900 dark:hover:text-amber-100 cursor-pointer ml-1"
+          >
+            Show All
+          </button>
         </div>
       )}
 
-      {(customLoadState.error || visibleLayerErrorEntries.length > 0) && (
-        <div className="pointer-events-none absolute top-20 right-4 z-10 max-w-sm">
-          <div className="pointer-events-auto flex items-start gap-2 rounded-lg border border-rose-500/30 bg-white/95 dark:bg-[#0B1222]/95 px-3.5 py-2.5 text-xs text-rose-600 dark:text-rose-400">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <div>
-              {customLoadState.error ? (
-                <span>Failed to load custom model: {customLoadState.error}</span>
-              ) : (
-                <span>
-                  Failed to load layer asset ({visibleLayerErrorEntries[0].url}):{' '}
-                  {visibleLayerErrorEntries[0].error}
-                </span>
-              )}
-            </div>
-          </div>
+      {/* Isolated Mode Indicator */}
+      {isolatedOrganUuid && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 font-medium">
+          <span>Organ Isolation Active</span>
+          <button
+            type="button"
+            onClick={handleRestoreCompleteBody}
+            className="font-semibold underline hover:text-cyan-900 dark:hover:text-cyan-100 cursor-pointer ml-1"
+          >
+            Restore Body
+          </button>
         </div>
       )}
 
-      {isDragging && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-cyan-950/75 border-2 border-dashed border-cyan-400">
-          <div className="rounded-xl bg-[#0B1222] px-6 py-4 text-center border border-cyan-500/40">
-            <Upload className="w-6 h-6 text-cyan-400 mx-auto mb-2" />
-            <p className="text-sm font-medium text-slate-100">Drop .GLB or .GLTF Anatomical Asset</p>
-          </div>
-        </div>
-      )}
-
+      {/* 3D WebGL Canvas */}
       {contextLost ? (
         <div className="flex h-full w-full flex-col items-center justify-center p-6 text-center">
           <AlertCircle className="w-8 h-8 text-amber-400 mb-3" />
@@ -1736,7 +2140,7 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
           frameloop={isSoftwareGl && !autoRotate ? 'demand' : 'always'}
           shadows={!isSoftwareGl}
           dpr={isSoftwareGl ? 1 : [1, 2]}
-          camera={{ position: [0, 0.98, 3.65], fov: 40, near: 0.05, far: 40 }}
+          camera={{ position: [0, 0.96, 3.85], fov: 38, near: 0.02, far: 60 }}
           gl={{
             antialias: !isSoftwareGl,
             powerPreference: 'high-performance',
@@ -1756,21 +2160,21 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
           }}
         >
           <color attach="background" args={[stageBg]} />
-          <fog attach="fog" args={[stageBg, 5, 13]} />
+          <fog attach="fog" args={[stageBg, 5.5, 14]} />
 
-          <hemisphereLight args={['#e0f2fe', isDark ? '#0b1120' : '#cbd5e1', 0.65]} />
+          <hemisphereLight args={['#e0f2fe', isDark ? '#0b1120' : '#cbd5e1', 0.68]} />
           <directionalLight
             position={[2.8, 4.2, 3.2]}
-            intensity={1.35}
+            intensity={1.38}
             color="#fff7ed"
             castShadow={!isSoftwareGl}
             shadow-mapSize={[1024, 1024]}
             shadow-bias={-0.0005}
           />
-          <directionalLight position={[-3.2, 2.2, -2.5]} intensity={0.7} color="#38bdf8" />
+          <directionalLight position={[-3.2, 2.2, -2.5]} intensity={0.72} color="#38bdf8" />
 
-          {/* Procedural Studio Environment (zero external HDR fetch) */}
-          <Environment resolution={128} frames={1} environmentIntensity={0.45}>
+          {/* Procedural Studio Environment */}
+          <Environment resolution={128} frames={1} environmentIntensity={0.48}>
             <Lightformer form="rect" intensity={1.8} position={[0, 4, 2]} scale={[6, 4, 1]} color="#f8fafc" />
             <Lightformer form="rect" intensity={1.1} position={[-4, 2, -2]} scale={[4, 4, 1]} color="#bae6fd" />
             <Lightformer form="rect" intensity={0.9} position={[4, 1, -2]} scale={[4, 4, 1]} color="#e0f2fe" />
@@ -1793,9 +2197,12 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
                 visible={Boolean(layerVisibility[layer.id])}
                 layerOpacity={layerOpacities[layer.id] ?? 1}
                 globalOpacity={globalOpacity}
-                renderMode={renderMode}
+                renderStyle={renderStyle}
                 selectedOrganUuid={activeOrgan?.meshUuid || null}
                 selectedSystem={selectedSystem}
+                isolatedOrganUuid={isolatedOrganUuid}
+                hiddenMeshUuids={hiddenMeshUuids}
+                explodedFactor={explodedFactor}
                 normalizeTransform={zAnatomyTransform}
                 onLayerProgress={handleLayerProgress}
                 onLayerLoaded={handleLayerLoaded}
@@ -1805,17 +2212,10 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
               />
             ))}
 
-          {hasCustomGlb && (
-            <SingleCustomAsset
-              url={modelAsset!.url}
-              renderMode={renderMode}
-              globalOpacity={globalOpacity}
-              selectedOrganUuid={activeOrgan?.meshUuid || null}
-              selectedSystem={selectedSystem}
-              onOrgansDiscovered={onOrgansDiscovered}
-              onLoadStateChange={setCustomLoadState}
-              onOrganHover={setHoveredOrgan}
-              onOrganClick={handleOrganSelect}
+          {showLabels && (
+            <AnatomicalLabels
+              onSelectTarget={handleQuickStructureSelect}
+              isDark={isDark}
             />
           )}
 
@@ -1823,9 +2223,9 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
             <ContactShadows
               position={[0, 0.004, 0]}
               opacity={isDark ? 0.45 : 0.25}
-              scale={3.5}
+              scale={3.6}
               blur={2.2}
-              far={2}
+              far={2.2}
             />
           )}
 
@@ -1841,34 +2241,36 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
         </Canvas>
       )}
 
-      {/* Unified Collapsible Bottom Control Dock */}
+      {/* Unified Ergonomic Bottom Control Dock */}
       <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center max-w-[96%]">
         <button
           type="button"
           onClick={() => setDockCollapsed((v) => !v)}
-          className="mb-1 inline-flex items-center gap-1 rounded-t-lg border border-b-0 border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 px-3 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-cyan-500 transition-colors cursor-pointer"
+          className="mb-1 inline-flex items-center gap-1 rounded-t-lg border border-b-0 border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/94 px-3 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-cyan-500 transition-colors cursor-pointer shadow-xs"
         >
           {dockCollapsed ? (
             <>
-              <ChevronUp className="w-3.5 h-3.5" />
-              Show Controls
+              <ChevronUp className="w-3.5 h-3.5 text-cyan-500" />
+              Show Anatomical Controls
             </>
           ) : (
             <>
-              <ChevronDown className="w-3.5 h-3.5" />
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
               Hide Controls
             </>
           )}
         </button>
 
         {!dockCollapsed && (
-          <div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0B1222]/95 px-3 py-2 shadow-sm">
+          <div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/96 dark:bg-[#0B1222]/96 px-3.5 py-2 shadow-lg backdrop-blur-none">
+            {/* Camera View Presets */}
             <div className="flex items-center gap-1 pr-2 border-r border-slate-200 dark:border-slate-800">
               {(
                 [
                   { id: 'anterior', label: 'Front' },
                   { id: 'posterior', label: 'Back' },
                   { id: 'lateral', label: 'Side' },
+                  { id: 'superior', label: 'Top' },
                 ] as const
               ).map((view) => (
                 <button
@@ -1884,9 +2286,10 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
                   {view.label}
                 </button>
               ))}
+
               <button
                 type="button"
-                onClick={() => triggerZoom(0.78)}
+                onClick={() => triggerZoom(0.76)}
                 title="Zoom In"
                 aria-label="Zoom In"
                 className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
@@ -1895,7 +2298,7 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => triggerZoom(1.28)}
+                onClick={() => triggerZoom(1.3)}
                 title="Zoom Out"
                 aria-label="Zoom Out"
                 className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
@@ -1905,7 +2308,7 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
               <button
                 type="button"
                 onClick={() => triggerPreset('reset')}
-                title="Reset Camera"
+                title="Reset Camera & Selection"
                 aria-label="Reset Camera"
                 className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
               >
@@ -1927,48 +2330,93 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
               </button>
             </div>
 
-            {hasAnyRealModel && (
-              <div className="flex items-center gap-1 pr-2 border-r border-slate-200 dark:border-slate-800">
-                {(
-                  [
-                    { id: 'standard', label: 'Natural' },
-                    { id: 'ghost-skeleton', label: 'Ghost Shell' },
-                    { id: 'xray', label: 'X-Ray' },
-                    { id: 'wireframe', label: 'Wire' },
-                  ] as const
-                ).map((mode) => (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    onClick={() => setRenderMode(mode.id)}
-                    className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                      renderMode === mode.id
-                        ? 'bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/30'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-                    }`}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Skin Transparency Slider */}
+            <div className="flex items-center gap-1.5 pr-2 border-r border-slate-200 dark:border-slate-800">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                Skin Opacity
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={skinOpacity}
+                onChange={(e) => handleSkinOpacityChange(parseFloat(e.target.value))}
+                aria-label="Adjust skin transparency"
+                className="w-16 accent-cyan-500 cursor-pointer"
+              />
+              <span className="font-mono tabular-nums text-[10px] text-slate-500 dark:text-slate-400 w-6">
+                {Math.round(skinOpacity * 100)}%
+              </span>
+            </div>
 
-            {hasAnyRealModel && (
-              <div className="flex items-center gap-1.5 pr-2 border-r border-slate-200 dark:border-slate-800">
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">Opacity</span>
-                <input
-                  type="range"
-                  min={0.15}
-                  max={1}
-                  step={0.05}
-                  value={globalOpacity}
-                  onChange={(e) => setGlobalOpacity(parseFloat(e.target.value))}
-                  aria-label="Global model opacity"
-                  className="w-16 accent-cyan-500 cursor-pointer"
-                />
-              </div>
-            )}
+            {/* Exploded View Slider & Reset */}
+            <div className="flex items-center gap-1.5 pr-2 border-r border-slate-200 dark:border-slate-800">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                Explode
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={explodedFactor}
+                onChange={(e) => setExplodedFactor(parseFloat(e.target.value))}
+                aria-label="Anatomical exploded view"
+                className="w-16 accent-cyan-500 cursor-pointer"
+              />
+              {explodedFactor > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setExplodedFactor(0)}
+                  title="Reset Exploded View"
+                  className="p-1 rounded text-cyan-500 hover:text-cyan-600 cursor-pointer"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
 
+            {/* Rendering Styles (Natural, Ghost, X-Ray, Wireframe) */}
+            <div className="flex items-center gap-1 pr-2 border-r border-slate-200 dark:border-slate-800">
+              {(
+                [
+                  { id: 'standard', label: 'Natural' },
+                  { id: 'ghost-skeleton', label: 'Ghost' },
+                  { id: 'xray', label: 'X-Ray' },
+                  { id: 'wireframe', label: 'Wire' },
+                ] as const
+              ).map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => setRenderStyle(mode.id)}
+                  className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                    renderStyle === mode.id
+                      ? 'bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/30'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                  }`}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+
+            {/* 3D Anatomical Landmark Labels Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowLabels((l) => !l)}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                showLabels
+                  ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border border-cyan-500/30 font-semibold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+              }`}
+            >
+              <Tag className="w-3.5 h-3.5" />
+              Labels
+            </button>
+
+            {/* Grid Toggle */}
             <button
               type="button"
               onClick={() => setShowGrid((g) => !g)}
@@ -1982,26 +2430,14 @@ export const AnatomyViewer: React.FC<AnatomyViewerProps> = ({
               Grid
             </button>
 
+            {/* Restore Complete Body Action */}
             <button
               type="button"
-              onClick={() => setShowSystemMarkers((m) => !m)}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                showSystemMarkers
-                  ? 'bg-slate-200/70 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
-                  : 'text-slate-500 dark:text-slate-400'
-              }`}
+              onClick={handleRestoreCompleteBody}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/10 transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Crosshair className="w-3.5 h-3.5" />
-              Pins
-            </button>
-
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/10 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              Custom .GLB
+              <RotateCcw className="w-3 h-3" />
+              Restore Body
             </button>
           </div>
         )}
