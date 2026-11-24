@@ -320,7 +320,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {attr.title}
                 </span>
                 <a
-                  href={attr.licenseUrl || attr.sourceUrl}
+                  href={attr.licenseUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-400 hover:underline font-mono text-[11px]"
