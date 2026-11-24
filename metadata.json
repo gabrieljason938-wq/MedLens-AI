@@ -1,0 +1,6 @@
+{
+  "name": "MedLens AI",
+  "description": "Intelligent Medical Report Analyzer with interactive 3D Z-Anatomy exploration, biomarker correlation, longitudinal health trends, and clinical AI insights.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

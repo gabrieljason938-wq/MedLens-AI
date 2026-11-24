@@ -1,0 +1,373 @@
+{
+  "source": "Z-Anatomy (Official Models-of-human-anatomy / Unity-app_Z-Anatomy)",
+  "license": "CC BY-SA 4.0",
+  "derivedFrom": "BodyParts3D (The Database Center for Life Science) — CC BY-SA 2.1 Japan",
+  "generatedAt": "2026-11-24T04:05:23.716Z",
+  "globalBounds": {
+    "min": [
+      -34.00592041015625,
+      -0.10000000149011612,
+      -14.834404945373535
+    ],
+    "max": [
+      34.00592803955078,
+      174.33401489257812,
+      14.878232955932617
+    ]
+  },
+  "layers": [
+    {
+      "id": "visceral",
+      "label": "Visceral & Organs",
+      "fileName": "visceral.glb",
+      "url": "/models/z-anatomy/visceral.glb",
+      "sourceFbx": "VisceralSystem100.fbx",
+      "defaultVisible": true,
+      "meshCount": 121,
+      "sizeBytes": 4453896,
+      "bounds": {
+        "min": [
+          -13.228843688964844,
+          72.66453552246094,
+          -8.449296951293945
+        ],
+        "max": [
+          13.106742858886719,
+          161.970703125,
+          12.696799278259277
+        ]
+      },
+      "sampleOrgans": [
+        "Pleura",
+        "Laryngopharynx",
+        "Nasopharynx",
+        "Oropharynx",
+        "Pharynxj",
+        "Liver",
+        "Papillary_processj",
+        "Left_medial_segment_of_liver_(IV)",
+        "Left_anterior_lateral_segment_of_liver_(III)",
+        "Posterior_lateral_segment_of_liver_(VII)",
+        "Posterior_segment_of_liver_(I)",
+        "Anterior_medial_segment_of_liver_(V)",
+        "Left_posterior_lateral_segment_of_liver_(II)",
+        "Posterior_medial_segment_of_liver_(VIII)",
+        "Anterior_lateral_segment_of_liver_(VI)",
+        "Bile_duct",
+        "Gallbladder",
+        "Pancreas",
+        "Pancreatic_duct",
+        "Accessory_pancreatic_duct"
+      ]
+    },
+    {
+      "id": "cardiovascular",
+      "label": "Cardiovascular",
+      "fileName": "cardiovascular.glb",
+      "url": "/models/z-anatomy/cardiovascular.glb",
+      "sourceFbx": "CardioVascular41.fbx",
+      "defaultVisible": true,
+      "meshCount": 676,
+      "sizeBytes": 10437844,
+      "bounds": {
+        "min": [
+          -33.19915008544922,
+          0.34495407342910767,
+          -11.265356063842773
+        ],
+        "max": [
+          33.19915008544922,
+          170.14686584472656,
+          13.625555992126465
+        ]
+      },
+      "sampleOrgans": [
+        "Left_subclavian_artery",
+        "Vertebral_arteryl",
+        "Posterior_inferior_cerebellar_arteryl",
+        "Axillary_arteryl",
+        "Subscapular_arteryl",
+        "Circumflex_scapular_arteryl",
+        "Thoracodorsal_arteryl",
+        "Posterior_circumflex_humeral_arteryl",
+        "Anterior_circumflex_humeral_arteryl",
+        "Thoraco-acromial_arteryl",
+        "Pectoral_branches_of_thoraco-acromial_arteryl",
+        "Lateral_thoracic_arteryl",
+        "Brachial_arteryl",
+        "Radial_arteryl",
+        "Deep_palmar_archl",
+        "Palmar_metacarpal_arteriesl",
+        "Dorsal_carpal_anastomosisl",
+        "Dorsal_metacarpal_arteriesl",
+        "Dorsal_digital_arteries_of_handl",
+        "Palmar_carpal_branch_of_radial_arteryl"
+      ]
+    },
+    {
+      "id": "skeletal",
+      "label": "Skeletal System",
+      "fileName": "skeletal.glb",
+      "url": "/models/z-anatomy/skeletal.glb",
+      "sourceFbx": "SkeletalSystem100.fbx",
+      "defaultVisible": true,
+      "meshCount": 990,
+      "sizeBytes": 10980368,
+      "bounds": {
+        "min": [
+          -33.46245574951172,
+          0.9203156232833862,
+          -11.32791805267334
+        ],
+        "max": [
+          33.46246337890625,
+          170.54542541503906,
+          13.730799674987793
+        ]
+      },
+      "sampleOrgans": [
+        "Tibiar",
+        "Extensor_digitorum_longusor",
+        "Gracilis_muscleer",
+        "Tibialis_posterior_muscleor",
+        "Sartorius_muscleer",
+        "Soleus_muscleo1r",
+        "Patellar_ligamenter",
+        "Semitendinosus_muscleer",
+        "Popliteus_muscleer",
+        "Flexor_digitorum_longusor",
+        "Semimembranosus_muscleer",
+        "Tibialis_anterior_muscleor",
+        "Patellal",
+        "Quadriceps_femoris_muscleel",
+        "Patellar_ligamentol",
+        "Tibial",
+        "Soleus_muscleo1l",
+        "Sartorius_muscleel",
+        "Flexor_digitorum_longusol",
+        "Patellar_ligamentel"
+      ]
+    },
+    {
+      "id": "nervous",
+      "label": "Nervous System",
+      "fileName": "nervous.glb",
+      "url": "/models/z-anatomy/nervous.glb",
+      "sourceFbx": "NervousSystem100.fbx",
+      "defaultVisible": false,
+      "meshCount": 584,
+      "sizeBytes": 14486780,
+      "bounds": {
+        "min": [
+          -33.374114990234375,
+          0.6879639029502869,
+          -13.391327857971191
+        ],
+        "max": [
+          33.374122619628906,
+          170.0574493408203,
+          13.0259370803833
+        ]
+      },
+      "sampleOrgans": [
+        "Tentorium_cerebellil",
+        "Falx_cerebri",
+        "Tentorium_cerebellir",
+        "Spinal_dura",
+        "Choroid_plexusr",
+        "Choroid_plexusl",
+        "Putamenl",
+        "Putamenr",
+        "Caudate_nucleusr",
+        "Caudate_nucleusl",
+        "Lentiform_nucleusr",
+        "Globus_pallidusl",
+        "Globus_pallidusr",
+        "Lentiform_nucleusl",
+        "Inferior_occipital_gyrus_and_sulcus*l",
+        "Transverse_occipital_sulcusr",
+        "Transverse_occipital_sulcusl",
+        "Calcarine_sulcusl",
+        "Inferior_occipital_gyrus_and_sulcus*r",
+        "Superior_occipital_gyrir"
+      ]
+    },
+    {
+      "id": "muscular",
+      "label": "Muscular System",
+      "fileName": "muscular.glb",
+      "url": "/models/z-anatomy/muscular.glb",
+      "sourceFbx": "MuscularSystem100.fbx",
+      "defaultVisible": false,
+      "meshCount": 683,
+      "sizeBytes": 15768248,
+      "bounds": {
+        "min": [
+          -33.539039611816406,
+          0.6449318528175354,
+          -13.111309051513672
+        ],
+        "max": [
+          33.5390510559082,
+          170.7575225830078,
+          13.74323558807373
+        ]
+      },
+      "sampleOrgans": [
+        "Common_tendon_sheath_of_fibularis_musclesr",
+        "Plantar_tendon_sheath_of_fibularis_longus_musclel",
+        "Common_tendon_sheath_of_fibularis_musclesl",
+        "Plantar_tendon_sheath_of_fibularis_longus_muscler",
+        "Tendon_sheath_of_tibialis_posterior_musclel",
+        "Tendon_sheath_of_flexor_hallucis_longusr",
+        "Tendon_sheath_of_tibialis_posterior_muscler",
+        "Tendon_sheath_of_flexor_digitorum_longusr",
+        "Tendon_sheath_of_flexor_hallucis_longusl",
+        "Tendon_sheath_of_flexor_digitorum_longusl",
+        "Tendon_sheath_of_extensor_digitorum_longusl",
+        "Tendon_sheath_of_extensor_digitorum_longusr",
+        "Tendon_sheath_of_extensor_hallucis_longusr",
+        "Tendon_sheath_of_extensor_hallucis_longusl",
+        "Tendon_sheath_of_tibialis_anteriorl",
+        "Tendon_sheath_of_tibialis_anteriorr",
+        "Subcutaneous_bursa_of_tuberosity_of_tibial",
+        "Superior_bursa_of_biceps_femoris_musclel",
+        "Subtendinous_bursa_of_iliacus_muscler",
+        "Sciatic_bursa_of_obturator_internusl"
+      ]
+    },
+    {
+      "id": "lymphoid",
+      "label": "Lymphatic System",
+      "fileName": "lymphoid.glb",
+      "url": "/models/z-anatomy/lymphoid.glb",
+      "sourceFbx": "LymphoidOrgans100.fbx",
+      "defaultVisible": false,
+      "meshCount": 164,
+      "sizeBytes": 833128,
+      "bounds": {
+        "min": [
+          -22.614349365234375,
+          -0.10000000149011612,
+          -9.305689811706543
+        ],
+        "max": [
+          22.614421844482422,
+          159.30160522460938,
+          10.328721046447754
+        ]
+      },
+      "sampleOrgans": [
+        "Retropharyngeal_nodesr",
+        "Submental_nodesl",
+        "Supraclavicular_nodesr",
+        "Submental_nodesr",
+        "Supraclavicular_nodesl",
+        "Lateral_superior_jugular_nodel",
+        "Jugulodigastric_nodel",
+        "Lateral_superior_jugular_noder",
+        "Jugulodigastric_noder",
+        "Superficial_lateral_cervical_nodesl",
+        "Inferior_deep_lateral_cervical_nodesr",
+        "Anterior_inferior_jugular_nodesr",
+        "Inferior_deep_lateral_cervical_nodesl",
+        "Anterior_inferior_jugular_nodesl",
+        "Superficial_lateral_cervical_nodesr",
+        "Submandibular_nodesl",
+        "Thyroid_nodesr",
+        "Pretracheal_nodesr",
+        "Paratracheal_cervical_nodes",
+        "Pretracheal_nodesl"
+      ]
+    },
+    {
+      "id": "joints",
+      "label": "Joints & Ligaments",
+      "fileName": "joints.glb",
+      "url": "/models/z-anatomy/joints.glb",
+      "sourceFbx": "Joints100.fbx",
+      "defaultVisible": false,
+      "meshCount": 413,
+      "sizeBytes": 2825900,
+      "bounds": {
+        "min": [
+          -33.074947357177734,
+          0.868200957775116,
+          -10.204397201538086
+        ],
+        "max": [
+          33.07495880126953,
+          158.728515625,
+          12.876290321350098
+        ]
+      },
+      "sampleOrgans": [
+        "Cricopharyngeal_ligamentr",
+        "Cricopharyngeal_ligamentl",
+        "Quadrangular_membranel",
+        "Quadrangular_membraner",
+        "Median_cricothyroid_ligament",
+        "Lateral_thyrohyoid_ligamentl",
+        "Median_thyrohyoid_ligament",
+        "Lateral_thyrohyoid_ligamentr",
+        "Sacrospinous_ligamentl",
+        "Iliolumbar_ligamentr",
+        "Sacrotuberous_ligamentr",
+        "Sacrotuberous_ligamentl",
+        "Obturator_membraner",
+        "Sacrospinous_ligamentr",
+        "Obturator_membranel",
+        "Iliolumbar_ligamentl",
+        "Pubic_symphysis",
+        "Inferior_pubic_ligament",
+        "Superior_pubic_ligament",
+        "Interpubic_disc"
+      ]
+    },
+    {
+      "id": "body",
+      "label": "External Body",
+      "fileName": "body.glb",
+      "url": "/models/z-anatomy/body.glb",
+      "sourceFbx": "Regions of human body100.fbx",
+      "defaultVisible": true,
+      "defaultOpacity": 0.16,
+      "meshCount": 257,
+      "sizeBytes": 1341852,
+      "bounds": {
+        "min": [
+          -34.00592041015625,
+          -0.038242828100919724,
+          -14.834404945373535
+        ],
+        "max": [
+          34.00592803955078,
+          174.33401489257812,
+          14.878232955932617
+        ]
+      },
+      "sampleOrgans": [
+        "Gluteal_regionl",
+        "Gluteal_foldl",
+        "Gluteal_regionr",
+        "Gluteal_foldr",
+        "Hip_regionr",
+        "Anterior_region_of_kneel",
+        "Anterior_region_of_kneer",
+        "Posterior_region_of_kneer",
+        "Popliteal_fossar",
+        "Posterior_region_of_kneel",
+        "Popliteal_fossal",
+        "Lateral_malleolusl",
+        "Anterior_region_of_anklel",
+        "Medial_malleolusl",
+        "Medial_malleolusr",
+        "Lateral_malleolusr",
+        "Medial_retromalleolar_regionl",
+        "Lateral_retromalleolar_regionr",
+        "Medial_retromalleolar_regionr",
+        "Lateral_retromalleolar_regionl"
+      ]
+    }
+  ]
+}
